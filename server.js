@@ -1,117 +1,90 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const { v4: uuidv4 } = require("uuid");
+import express from "express";
+import fs from "fs";
+import fsPromises from "fs/promises";
+import { v4 as uuidv4 } from "uuid";
 
 const app = express();
-app.use(bodyParser.json());
+const PORT = 3000;
+const DATA_FILE = "users.json";
 
-// Ma'lumotlarni vaqtincha saqlash uchun massivlar
-let users = [];
-let posts = [];
-let comments = [];
+// Fayl mavjudligini tekshirish va yaratish
+const checkFile = async () => {
+  try {
+    await fsPromises.access(DATA_FILE);
+  } catch (error) {
+    await fsPromises.writeFile(DATA_FILE, "[]");
+    console.log("users.json fayl yaratildi");
+  }
+};
+await checkFile();
 
-//1. User Registration 
-app.post("/register", (req, res) => {
-  const { email, password, confirmPassword, name, birthday, gender, phone } =
-    req.body;
+// Middleware
+app.use(express.json());
 
-  if (password !== confirmPassword) {
-    return res.status(400).json({ error: "Passwords do not match!" });
+// JSON faylni o‘qish
+const readUsers = async () => {
+  try {
+    const data = await fsPromises.readFile(DATA_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch (error) {
+    console.error("users.json faylni oqishda xatolik:", error);
+    return [];
+  }
+};
+
+// JSON faylga yozish
+const writeUsers = async (users) => {
+  try {
+    await fsPromises.writeFile(DATA_FILE, JSON.stringify(users, null, 2));
+  } catch (error) {
+    console.error("users.json faylni yozishda xatolik:", error);
+  }
+};
+
+// Register 
+app.post("/register", async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email va parol talab qilinadi" });
   }
 
-  const newUser = {
-    id: uuidv4(),
-    email,
-    password,
-    name,
-    birthday,
-    gender,
-    phone,
-  };
+  const users = await readUsers();
+  const existingUser = users.find((user) => user.email === email);
+  if (existingUser) {
+    return res
+      .status(400)
+      .json({ error: "Bunday foydalanuvchi allaqachon mavjud" });
+  }
+
+  const newUser = { id: uuidv4(), email, password };
   users.push(newUser);
-  res
-    .status(201)
-    .json({ message: "User registered successfully!", user: newUser });
+  await writeUsers(users);
+
+  res.status(201).json({
+    message: "Foydalanuvchi ro'yxatdan o'tkazildi",
+    userId: newUser.id,
+  });
 });
 
-//2. User Login 
-app.post("/login", (req, res) => {
+// Login qilish
+app.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  const user = users.find((u) => u.email === email && u.password === password);
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email va parol talab qilinadi" });
+  }
+
+  const users = await readUsers();
+  const user = users.find(
+    (user) => user.email === email && user.password === password
+  );
 
   if (!user) {
-    return res.status(401).json({ error: "Invalid email or password!" });
+    return res.status(401).json({ error: "Email yoki parol notogri" });
   }
 
-  res.json({ message: "Login successful!", user });
+  res.json({ message: "Kirish muvaffaqiyatli", userId: user.id });
 });
 
-// 3. Create a Post
-app.post("/posts", (req, res) => {
-  const { title, content, user_id } = req.body;
-  const post = {
-    id: uuidv4(),
-    title,
-    content,
-    slug: title.toLowerCase().replace(/\s+/g, "-"),
-    user_id,
-  };
-  posts.push(post);
-  res.status(201).json({ message: "Post created successfully!", post });
+app.listen(PORT, () => {
+  console.log(`Server ishlayapti: http://localhost:${PORT}`);
 });
-
-//4. Get All Posts
-app.get("/posts", (req, res) => {
-  res.json(posts);
-});
-
-//5. Create a Comment 
-app.post("/comments", (req, res) => {
-  const { content, post_id, user_id } = req.body;
-  const comment = {
-    id: uuidv4(),
-    content,
-    post_id,
-    user_id,
-    created_at: new Date().toISOString(),
-  };
-  comments.push(comment);
-  res.status(201).json({ message: "Comment added!", comment });
-});
-
-//6. Get All Comments
-app.get("/comments", (req, res) => {
-  res.json(comments);
-});
-
-// 7. Get Users 
-app.get("/users", (req, res) => {
-  res.json(users);
-});
-
-// 8. Delete a Post
-app.delete("/posts/:id", (req, res) => {
-  const { id } = req.params;
-  posts = posts.filter((post) => post.id !== id);
-  res.json({ message: "Post deleted successfully!" });
-});
-
-//9. Delete a Comment
-app.delete("/comments/:id", (req, res) => {
-  const { id } = req.params;
-  comments = comments.filter((comment) => comment.id !== id);
-  res.json({ message: "Comment deleted!" });
-});
-
-//10. Delete a User
-app.delete("/users/:id", (req, res) => {
-  const { id } = req.params;
-  users = users.filter((user) => user.id !== id);
-  res.json({ message: "User deleted!" });
-});
-
-// Serverni ishga tushirish
-const PORT = 4000;
-app.listen(PORT, () =>
-  console.log(`Server running on http://localhost:${PORT}`)
-);
